@@ -1,0 +1,924 @@
+---
+title: "Session 4: Homework 2"
+author: "Group 3 (Jiaying Chen, Yingjin He, Sabrina Seow, Kashish Solanki, Roman Vazquez Lorenzo, Maximilian Stock)"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: flatly
+    highlight: zenburn
+    number_sections: yes
+    toc: yes
+    toc_float: yes
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  message = FALSE, 
+  warning = FALSE, 
+  tidy=FALSE,     # display code as typed
+  size="small")   # slightly smaller font for code
+options(digits = 3)
+
+# default figure size
+knitr::opts_chunk$set(
+  fig.width=6.75, 
+  fig.height=6.75,
+  fig.align = "center"
+)
+```
+
+```{r load-libraries, include=FALSE}
+library(tidyverse)  # Load ggplot2, dplyr, and all the other tidyverse packages
+library(mosaic)
+library(ggthemes)
+library(lubridate)
+library(here)
+library(skimr)
+library(janitor)
+library(httr)
+library(readxl)
+library(vroom)
+library(scales)
+library(hms)
+library(infer)
+```
+
+# Climate change and temperature anomalies
+
+If we wanted to study climate change, we can find data on the *Combined Land-Surface Air and Sea-Surface Water Temperature Anomalies* in the Northern Hemisphere at [NASA's Goddard Institute for Space Studies](https://data.giss.nasa.gov/gistemp). The [tabular data of temperature anomalies can be found here](https://data.giss.nasa.gov/gistemp/tabledata_v4/NH.Ts+dSST.txt).
+
+The period between 1951 - 1980 is our reference in defining temperature anomalies.
+
+## Loading the data set
+
+```{r weather_data, cache=TRUE}
+
+weather <- 
+  read_csv("https://data.giss.nasa.gov/gistemp/tabledata_v4/NH.Ts+dSST.csv", 
+           skip = 1,  #real data table only starts in Row 2, so we need to skip one row. 
+           na = "***") 
+
+```
+
+For each month and year, the data frame shows the deviation of temperature from the normal (expected).
+
+## Isolating the columns we need and tidy data
+
+```{r tidyweather}
+
+tidyweather <- weather %>% 
+  select(c("Year", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")) %>%
+  pivot_longer(cols=c('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'),
+               names_to = "Month", values_to = "Delta") 
+
+```
+
+## Plotting information
+
+```{r scatter_plot}
+
+tidyweather <- tidyweather %>%
+  mutate(date = ymd(paste(as.character(Year), Month, "1")),
+         Month = month(date, label=TRUE),
+         Year = year(date))
+
+```
+
+```{r graphDeltaWeather, fig.width=11}
+ggplot(tidyweather, aes(x=date, y=Delta))+
+  geom_point(size = 0.5)+
+  geom_smooth(color="red") +
+  theme_bw() +
+  labs (
+    title = "Weather Anomalies",
+    subtitle = "Temperature progression over time",
+    x = "Year",
+    y = "Delta in T (°C)"
+  )+
+  # scale_x_date(date_breaks = seq(min(tidyweather$date), max(tidyweather$date), by = 8300))
+     scale_x_date(date_labels = "%Y", date_breaks = "10 years")
+
+```
+
+Scatter plot for each month:
+
+```{r facet_wrap, fig.width = 11}
+
+tidyweather$Month <- factor(tidyweather$Month, 
+                            levels = c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")) #so that the facet wrap shows according to months
+
+ggplot(tidyweather, aes(x=date, y=Delta))+
+  geom_point(size = 0.3)+
+  geom_smooth(color="red") +
+  theme_bw() +
+  facet_wrap(vars(Month)) +
+  labs (
+     title = "Weather Anomalies broken down by months",
+    subtitle = "Temperature progression over time",
+    x = "Year",
+    y = "Delta in T (°C)"
+  )
+
+```
+
+*Based on our analysis, the effect of increasing temperature seems to be constant throughout the year. A more obvious indicator would be the Year instead - the effect of increasing temperature is more pronounced after the period between 1951-1980 as we can see a steep increase in the graph.*
+
+## Grouping the data into time periods
+
+```{r intervals}
+
+comparison <- tidyweather %>% 
+  filter(Year>= 1881) %>%     #remove years prior to 1881
+  #create new variable 'interval', and assign values based on criteria below:
+  mutate(Interval = case_when(
+    Year %in% c(1881:1920) ~ "1881-1920",
+    Year %in% c(1921:1950) ~ "1921-1950",
+    Year %in% c(1951:1980) ~ "1951-1980",
+    Year %in% c(1981:2010) ~ "1981-2010",
+    TRUE ~ "2011-present"
+  ))
+
+```
+
+## Distribution of monthly deviations
+
+```{r density_plot, fig.width=11}
+
+ggplot(comparison, aes(x=Delta, fill=Interval))+
+  geom_density(alpha=0.2) +   #density plot with transparency set to 20%
+  theme_bw() +                #theme
+  labs (
+    title = "Density Plot for Monthly Temperature Anomalies",
+    y     = "Density",         #changing y-axis label to sentence case
+    x = "Delta in T (°C)"
+  )
+
+```
+
+## Average annual anomalies
+
+```{r averaging, fig.width=11}
+
+#creating yearly averages
+average_annual_anomaly <- tidyweather %>% 
+  group_by(Year) %>%   
+  summarise(annual_average_delta = mean(Delta, na.rm=TRUE))
+
+#plotting the data:
+ggplot(average_annual_anomaly, aes(x=Year, y= annual_average_delta))+
+  geom_point(size = 0.8)+
+  geom_smooth(colour = "red") +
+  theme_bw() +
+labs (
+     title = "Average Yearly Temperature Anomaly",
+    subtitle = "Temperature progression over time",
+    x = "Year",
+    y = "Delta in T (°C)"
+  )+
+  scale_x_continuous(n.breaks = 20)
+
+
+
+```
+
+## Confidence Interval for `delta`
+
+[NASA points out on their website](https://earthobservatory.nasa.gov/world-of-change/decadaltemp.php) that
+
+> A one-degree global change is significant because it takes a vast amount of heat to warm all the oceans, atmosphere, and land by that much. In the past, a one- to two-degree drop was all it took to plunge the Earth into the Little Ice Age.
+
+### Confidence Interval for `delta` (Formula)
+
+```{r calculate_CI_using_formula}
+
+formula_CI <- comparison %>% 
+  filter(Interval == "2011-present") %>%
+  summarize(median_delta = median(Delta, na.rm=TRUE),
+            mean_delta = mean(Delta, na.rm=TRUE), 
+            sd_delta = sd(Delta, na.rm=TRUE), 
+            count = n(), 
+            t_critical = qt(0.975, count -1),
+            se_delta = sd_delta/sqrt(count), 
+            margin_of_error = t_critical * se_delta,
+            lower_CI_delta = mean_delta - margin_of_error,
+            upper_CI_delta = mean_delta + margin_of_error
+  )
+            
+#print out formula_CI
+formula_CI
+
+```
+
+### Confidence Interval for `delta` (Bootstrapping)
+
+```{r calculate_CI_using_bootstrap}
+
+library(infer)
+
+set.seed(1234)
+
+boot_delta <- comparison %>% 
+  filter(Interval == "2011-present") %>% 
+  specify(response = Delta) %>% 
+  generate(reps = 1000, type = "bootstrap") %>% 
+  calculate(stat="mean") 
+
+percentile_ci <- boot_delta %>%  
+  get_ci(level = 0.95, type = "percentile")
+
+#print out bootstrap_CI
+percentile_ci
+
+```
+
+### Comparison of Confidence Intervals
+
+```{r visualizing_bootstrap, fig.height=9, fig.width=11}
+
+visualize(boot_delta) +
+  shade_ci(endpoints = percentile_ci) + 
+  geom_vline(xintercept = formula_CI$lower_CI_delta, linetype = "dashed", colour = "red", size = 1) +
+  geom_vline(xintercept = formula_CI$upper_CI_delta,linetype = "dashed", colour = "red", size = 1) + 
+  theme_bw() +
+  labs(
+    title = "Bootstrap CI for Average Annual Delta since 2011", 
+    subtitle = "Fomula CI shown with dashed red lines",
+    x = "Delta T (°C)",
+    y = "Count"
+    
+  )
+
+```
+
+*Based on our analysis, the 95% confidence interval (CI) for the average annual delta since 2011 was calculated as (1.01, 1.11). This means that we can be 95% confident that the average annual delta falls within 1.01 and 1.11. We constructed the CI using the formula method and using a bootstrap simulation, both method gives us a very similar width - the shaded area is the CI calculated using a bootstrap simulation and the range between the dotted lines is the CI calculated using the formula.*
+
+# General Social Survey (GSS)
+
+The [General Social Survey (GSS)](http://www.gss.norc.org/) gathers data on American society in order to monitor and explain trends in attitudes, behaviours, and attributes. Many trends have been tracked for decades, so one can see the evolution of attitudes, etc in American Society.remove.packages("affycoretools")
+
+In this assignment we analyze data from the **2016 GSS sample data**, using it to estimate values of *population parameters* of interest about US adults. The GSS sample data file has 2867 observations of 935 variables, but we are only interested in very few of these variables and you are using a smaller file.
+
+```{r read_gss_data, cache=TRUE}
+gss <- read_csv(here::here("data", "smallgss2016.csv"), 
+                na = c("", "Don't know",
+                       "No answer", "Not applicable"))
+```
+
+The variables we have are the following:
+
+-   hours and minutes spent on email weekly. The responses to these questions are recorded in the `emailhr` and `emailmin` variables. For example, if the response is 2.50 hours, this would be recorded as emailhr = 2 and emailmin = 30.
+-   `snapchat`, `instagrm`, `twitter`: whether respondents used these social media in 2016
+-   `sex`: Female - Male
+-   `degree`: highest education level attained
+
+## Instagram and Snapchat, by sex
+
+Can we estimate the *population* proportion of Snapchat or Instagram users in 2016?
+
+1.  Create a new variable, `snap_insta` that is *Yes* if the respondent reported using any of Snapchat (`snapchat`) or Instagram (`instagrm`), and *No* if not. If the recorded value was NA for both of these questions, the value in your new variable should also be NA.
+
+```{r gss_insta_snap}
+gss_snap_insta <- gss %>% 
+mutate(snap_insta = case_when( 
+      snapchat == "Yes" ~ "Yes", 
+      instagrm == "Yes" ~ "Yes", 
+      snapchat == "No" ~ "No", 
+      instagrm == "No" ~ "No"
+      )) 
+gss_snap_insta
+```
+
+2.  Calculate the proportion of Yes's for `snap_insta` among those who answered the question, i.e. excluding NAs.
+
+```{r gss_props}
+gss_proportion <- gss_snap_insta %>%
+  group_by(snap_insta)%>% 
+  summarise(n = sum(!is.na(snap_insta)))%>% #count people that use or don't use either snapchat of instagram excluding NA
+  mutate(Prop_prct = n/sum(n)*100) # divide each veriable of "No" and "Yes" by total to get proportion
+gss_proportion 
+
+```
+
+3.  Using the CI formula for proportions, please construct 95% CIs for men and women who used either Snapchat or Instagram
+
+```{r snap_insta}
+count_sex_snap_insta <- gss_snap_insta%>%
+  count(sex, snap_insta)%>% 
+  na.omit() # omit NA rows
+count_sex_snap_insta
+
+CI_male_test <-  prop.test(as.double(count_sex_snap_insta[4,"n"]), as.double(count_sex_snap_insta[4,"n"])+as.double(count_sex_snap_insta[3,"n"])) # Construct test to obtain 95% CI for men who used either Snapchat or Instragram
+CI_female_test <-  prop.test(as.double(count_sex_snap_insta[2, "n"]),as.double(count_sex_snap_insta[2, "n"])+as.double(count_sex_snap_insta[1, "n"]) ) # Construct test to obtain 95% CI for women who used either Snapchat or Instragram
+
+CI_male_test
+CI_female_test
+```
+
+## Twitter, by education level
+
+Can we estimate the *population* proportion of Twitter users by education level in 2016?.
+
+There are 5 education levels in variable `degree` which, in ascending order of years of education, are Lt high school, High School, Junior college, Bachelor, Graduate.
+
+1.  Turn `degree` from a character variable into a factor variable. Make sure the order is the correct one and that levels are not sorted alphabetically which is what R by default does.
+
+```{r degree_level}
+gss_factor <- gss%>%
+  mutate(degree = as.factor(degree))%>%
+  arrange(match(degree, c("Lt high school", "High School", "Junior College", "Bachelor", "Graduate")), desc(degree)) # Manually specify order using arrange and match
+gss_factor
+```
+
+2.  Create a new variable, `bachelor_graduate` that is *Yes* if the respondent has either a `Bachelor` or `Graduate` degree. As before, if the recorded value for either was NA, the value in your new variable should also be NA.
+
+```{r bachelor_graduate}
+gss_bachelor_graduate <- gss%>%
+mutate(bachelor_graduate = case_when(
+  degree == "Bachelor" ~ "Yes",
+  degree == "Graduate" ~ "Yes"
+      ))
+
+gss_bachelor_graduate
+```
+
+3.  Calculate the proportion of `bachelor_graduate` who do (Yes) and who don't (No) use twitter.
+
+```{r bachelor_graduate_twitter}
+gss_proportion_twr <- gss_bachelor_graduate%>%
+  group_by(bachelor_graduate, twitter)%>%
+  na.omit()%>% # Exlude NA rows
+  filter(twitter!="NA")%>%  # Exclude rows with character "NA"
+  summarise(n = count(twitter))%>% #count people that use twitter
+  mutate(prop_twitter_prct = n/sum(n)*100) # divide each variable of bachelor and graduate students who use or don't use twitter by total to get proportion
+gss_proportion_twr 
+```
+
+4.  Using the CI formula for proportions, please construct two 95% CIs for `bachelor_graduate` vs whether they use (Yes) and don't (No) use twitter.
+
+```{r CI_bachelor_graduate_twitter}
+
+
+CI_no_twitter_test <-  prop.test(as.double(gss_proportion_twr[1,"n"]), as.double(count_sex_snap_insta[2,"n"])+as.double(count_sex_snap_insta[1,"n"])) # Construct test to obtain 95% CI for bachelor and graduate students who do not use twitter
+CI_yes_twitter_test <-  prop.test(as.double(gss_proportion_twr[2,"n"]), as.double(count_sex_snap_insta[2,"n"])+as.double(count_sex_snap_insta[1,"n"])) # Construct test to obtain 95% CI for bachelor and graduate students who use twitter
+
+
+CI_no_twitter_test
+CI_yes_twitter_test
+
+```
+
+5.  Do these two Confidence Intervals overlap?
+
+*The two confidence intervals do not overlap. The 95% CI for bachelor and graduates who use twitter is* \[0.124, 0.176\]*, while the one for those who do not use twitter is \[0.452, 0.524\], hence there is a difference of 0.276 between both.*
+
+## Email usage
+
+Can we estimate the *population* parameter on time spent on email weekly?
+
+1.  Create a new variable called `email` that combines `emailhr` and `emailmin` to report the number of minutes the respondents spend on email weekly.
+
+```{r gss_email}
+gss_email <- gss%>%
+  filter(emailhr!="NA", emailmin!="NA", degree!="NA")%>% # Exclude rows containing character "NA"
+  mutate(emailhr = as.double(emailhr) * 60)%>% # Obtain hours in minutes and as a double
+  mutate(emailmin = as.double(emailmin))%>% # Change minutes to double
+  rowwise()%>%
+  mutate(email = sum(emailmin, emailhr)) # Sum hours and minutes spent on email a week and create new column email with the sum
+
+gss_email
+```
+
+2.  Visualise the distribution of this new variable. Find the mean and the median number of minutes respondents spend on email weekly. Is the mean or the median a better measure of the typical amount of time Americans spend on email weekly? Why?
+
+*The median `dashed orange line` is more representative of the typical amount of time Americans spend on email weekly than the mean `dashed red line`. This is mostly due to the fact that the distribution is heavily right skewed, meaning that there are few Americans who spend a long time on email and most remain within the 0-500 minutes a week. As it can be observed from the mean and median table, for all degree groups, mean gives higher values resulting from a few Americans spending a lot of time on emails, making the mean less representative than the median.*
+
+```{r face_wrap_email, fig.width=11, fig.height=11}
+email_distribution <- ggplot(gss_email, aes(x = email))+
+  geom_histogram(bins = 35)+
+  geom_vline(aes(xintercept = median(email)), linetype = "dashed", colour = "orange", size = 0.5)+ # create orange dashed line displaying median value
+  geom_vline(aes(xintercept = mean(email)), linetype = "dashed", colour = "red", size = 0.5)+ # create red dashed line displaying mean value
+
+  facet_wrap(vars(degree), scale = "free")+ # facet wrap by degree
+  ggthemes::theme_stata()+
+  theme(plot.background = element_blank())
+
+  
+email_distribution
+
+email_mean <- gss_email%>%
+  group_by(degree)%>%
+  summarise(mean = mean(email), median = median(email))%>%
+  arrange(match(degree, c("Lt high school", "High School", "Junior College", "Bachelor", "Graduate")), desc(degree)) # create dataframe showing mean and median values for each education level
+email_mean
+
+```
+
+3.  Using the `infer` package, calculate a 95% bootstrap confidence interval for the mean amount of time Americans spend on email weekly. Interpret this interval in context of the data, reporting its endpoints in "humanized" units (e.g. instead of 108 minutes, report 1 hr and 8 minutes). If you get a result that seems a bit odd, discuss why you think this might be the case.
+
+```{r}
+boot_emails <- email_mean%>%
+  specify(response = mean)%>% # Specify variable of interest - mean of time spent on email weekly
+  generate(reps = 1000, type = "bootstrap")%>% # Generate 1000 bootstrap samples
+  calculate(stat = "mean") # find mean of each sample
+
+percentile_ci <- boot_emails%>%
+  get_confidence_interval(level = 0.95, type = "percentile")%>% # obtain CI
+  mutate(lower_ci = round_hms(as.hms(lower_ci*60),1), upper_ci = round_hms(as.hms(upper_ci*60),1)) %>% # convert values into readable time format
+  rename("Lower CI h:m:s"= lower_ci, "Upper CI h:m:s" = upper_ci)
+
+percentile_ci
+```
+
+4.  Would you expect a 99% confidence interval to be wider or narrower than the interval you calculated above? Explain your reasoning.
+
+*The interval for the mean value of hours spend on email a week would be wider because the t-critical value would increase, given that the confidence level rises to 99%.*
+
+# Biden's Approval Margins
+
+As we saw in class, fivethirtyeight.com has detailed data on [all polls that track the president's approval ](https://projects.fivethirtyeight.com/biden-approval-ratings)
+
+```{r import_approval_data, cache=TRUE}
+# Import approval polls data directly off fivethirtyeight website
+approval_polllist <- read_csv('https://projects.fivethirtyeight.com/biden-approval-data/approval_polllist.csv') 
+
+glimpse(approval_polllist)
+
+# Use `lubridate` to fix dates, as they are given as characters.
+```
+
+## Create a plot
+
+```{r biden_margin_approval}
+approval_polllist$enddate<-mdy(approval_polllist$enddate)
+
+approval_plot<-approval_polllist%>%
+  filter(subgroup=="Voters")%>% #limit the data to group "Voters" in order to recreate the graph
+  select(enddate,pollster,samplesize,weight,approve, disapprove)%>%
+  mutate(week_poll=week(enddate),mg_approval=approve-disapprove) #obtain the week of the enddate, to plot it against average approval
+
+approval_biden<-approval_plot%>% 
+ group_by(week_poll)%>%
+  summarise(margin_apr_mean=mean(mg_approval),
+            sd_margin=sd(mg_approval),
+            count_pollster=n(),
+            t_critical = qt(0.975,count_pollster-1), #calculate t critical, for 95% confidence (2.5% per side)
+            se_margin=sd_margin/sqrt(count_pollster),
+            lower_interval=margin_apr_mean-t_critical*se_margin,
+            higher_interval=margin_apr_mean+t_critical*se_margin, #calculate confidence interval
+            )
+```
+
+
+```{r biden_plot, fig.width=11}
+approval_plot1<-ggplot(approval_biden,aes(x=week_poll))+
+  geom_line(aes(y=margin_apr_mean),color="red",size=0.5)+
+  geom_point(aes(y=margin_apr_mean),color="red",size=0.8)+
+  geom_smooth(aes(y=margin_apr_mean),se=FALSE,size=0.8)+
+  geom_line(aes(y=lower_interval),color="pink",size=0.3)+
+  geom_line(aes(y=higher_interval),color="pink",size=0.3)+
+  geom_ribbon(aes(ymin=higher_interval,ymax=lower_interval),fill="grey",alpha=0.3)+
+  geom_hline(yintercept =0,color="orange",size=1)+
+  
+  labs(x="Week of the year",y="Average approval margin (approval - disapproval)",
+       title = "Estimating approval margin(approval - disapproval) for Biden",
+       subtitle = "2021 weekly average of all polls")+
+  
+  theme_bw()+
+  theme(plot.background = element_rect(fill = NA , colour = 'grey',size=0.1))+
+  theme(panel.border = element_rect(colour = NA, fill=NA))+
+  ylim(-15,30)
+     
+approval_plot1
+```
+
+
+## Compare Confidence Intervals
+
+Compare the confidence intervals for `week 4` and `week 25`. Can you explain what's going on? One paragraph would be enough.
+
+*The large confidence interval from week 4 very likely ascribes to the small sample of that week, while week 25 has a comparatively large sample size and hence a much smaller confidence interval.*
+
+# Gapminder revisited
+
+Recall the `gapminder` data frame from the gapminder package.
+
+- Life expectancy at birth (life_expectancy_years.csv)
+- GDP per capita in constant 2010 US$ (https://data.worldbank.org/indicator/NY.GDP.PCAP.KD)
+- Female fertility: The number of babies per woman (https://data.worldbank.org/indicator/SP.DYN.TFRT.IN)
+- Primary school enrollment as % of children attending primary school (https://data.worldbank.org/indicator/SE.PRM.NENR)
+- Mortality rate, for under 5, per 1000 live births (https://data.worldbank.org/indicator/SH.DYN.MORT)
+- HIV prevalence (adults_with_hiv_percent_age_15_49.csv): The estimated number of people living with HIV per 100 population of age group 15-49.
+
+```{r get_data, cache=TRUE}
+
+# load gapminder HIV data
+hiv <- read_csv(here::here("data","adults_with_hiv_percent_age_15_49.csv"))
+life_expectancy <- read_csv(here::here("data","life_expectancy_years.csv"))
+
+# get World bank data using wbstats
+indicators <- c("SP.DYN.TFRT.IN","SE.PRM.NENR", "SH.DYN.MORT", "NY.GDP.PCAP.KD")
+
+
+library(wbstats)
+
+worldbank_data <- wb_data(country="countries_only", #countries only- no aggregates like Latin America, Europe, etc.
+                          indicator = indicators, 
+                          start_date = 1960, 
+                          end_date = 2016)
+
+# get a dataframe of information regarding countries, indicators, sources, regions, indicator topics, lending types, income levels,  from the World Bank API 
+countries <-  wbstats::wb_cachelist$countries
+
+```
+
+```{r tidy_df,warnings=FALSE}
+#hiv prevalence into year
+hiv_1 <- hiv %>% 
+  pivot_longer(cols=2:34, 
+               names_to="year", 
+               values_to = "hiv_pct")
+
+#life expectancy
+life_exp1 <- life_expectancy %>% 
+    pivot_longer(cols=2:302, 
+               names_to="year", 
+               values_to = "life_expectancy")
+ 
+colnames(worldbank_data)[4] <- "year"
+
+
+```
+```{r join the df, warning =FALSE}
+#join df together,because hiv data contains data from 1979-2011 while life expectancy data is from 1800-2100, so left join will guarantee there will be less NULL data
+new_dataset <- hiv_1 %>% 
+  left_join(life_exp1, by=c("country","year"))
+#change data type
+new_dataset <- new_dataset %>%
+ mutate(year=as.numeric(year)) 
+
+new_dataset <- new_dataset %>% 
+  left_join(worldbank_data, by=c("country","year"))
+
+#only keep the necessary columns to make the dataset smaller
+country <- countries %>%
+  select(country,region,region_iso3c,region_iso2c)
+
+new_dataset<- new_dataset  %>% 
+  left_join(country, by=c("country"))
+
+## remove those countries that don't have a region
+new_dataset<- subset(new_dataset,region!="NA")
+
+skim(new_dataset)
+
+#join again to get data from 1960--2016（the data in newdataset is 1979-2011)
+worldbank2<- worldbank_data %>%
+  left_join(country, by=c("country"))
+worldbank2<- subset(worldbank2,region!="NA")
+```
+
+1. What is the relationship between HIV prevalence and life expectancy? Generate a scatterplot with a smoothing line to report your results. You may find faceting useful
+```{r hiv_life_expectancy,warning=FALSE, fig.width=11}
+#overall condition
+hiv_life_expectancy <- ggplot(new_dataset,aes(x=hiv_pct, y=life_expectancy))+
+  geom_point(aes(color=region), size=0.2)+
+  ylim(30,90)+
+  theme_bw()+
+  geom_smooth(method = "lm")+
+  labs(title = "Scatterplot of HIV prevalence and life expectancy", y = "life expectancy", x= "HIV prevalence %")+
+ # theme(legend.position = "none")+
+  NULL
+
+hiv_life_expectancy
+#faceting by regions
+hiv_life_expectancy_region <- ggplot(new_dataset, aes(x=hiv_pct, y=life_expectancy))+
+  geom_point(aes(color=region), size=0.2)+
+  geom_smooth(method = "lm")+
+  labs(title = "HIV prevalence and life expectancy by region", y = "Life expectancy ", x= "HIV prevalence %", subtitle = "Scatterplots seperated by regions")+
+ # xlim(0,3)+
+  ylim(30,90)+
+  theme_bw()+
+  facet_wrap(vars(region), scales = "free" )+
+  theme(legend.position = "none")+
+  NULL
+
+hiv_life_expectancy_region
+```
+*From the scatterplot above, we can observe that HIV prevalence is generally negatively related with life expectancy. Those countries with higher life expectancy are more likely to have lower HIV prevalence rates, probably because those countries are in better medical conditions. As for the difference between regions, most regions show a negative relationship between HIV prevalence and life expectancy, except Europe& Central Asia and North America. This is probably because these regions keep very low HIV prevalence so the pattern is not so obvious. Another point is that Sub-Saharan Africa has a lower life expectancy and higher HIV prevalence compared to other regions.*
+
+2. What is the relationship between fertility rate and GDP per capita? Generate a scatterplot with a smoothing line to report your results. You may find facetting by region useful
+```{r fertility_gdp,warning=FALSE, fig.width=11}
+#overall condition
+fertility_gdp <- ggplot(worldbank2, aes(x=NY.GDP.PCAP.KD, y=SP.DYN.TFRT.IN))+
+  geom_point(aes(color=region), size=0.2)+
+  ylim(0,10)+
+  theme_bw()+
+  geom_smooth(method = "lm")+ 
+  labs(title = "Scatterplot of fertility rate and GDP per capita", y = "fertility rate", x= "GDP per capita")+
+ # theme(legend.position = "none")+
+  xlim(0, 150000)
+  NULL
+
+fertility_gdp
+
+#faceting by regions
+fertility_gdp_region <- new_dataset %>% 
+  # filter(year == 2011) %>% 
+  ggplot(aes(x=NY.GDP.PCAP.KD, y=SP.DYN.TFRT.IN))+
+  geom_point(aes(color=country), size=0.2)+
+  labs(title = "Scatterplot of fertility rate and GDP per capita by region", y = "Fertility rate", x= "GDP per capita")+
+  geom_smooth(method = "lm")+
+ # xlim(0,150000)+
+  #ylim(30,90)+
+  theme_bw()+
+  facet_wrap(vars(region), scales = "free" )+
+  theme(legend.position = "none")+
+  NULL
+
+fertility_gdp_region
+
+```
+*As the scatterplot above indicates, there is a negative correlation between fertility rate and GDP per capita. This relationship is especially strong in regions that are typically less developed such as Sub-Saharan Africa and South Asia. In North America, the trendline is slightly positive, possibly due to the small sample size. Overall, Europe & Central Asia have the lowest fertility rate and highest GDP per capita among all the regions.*
+
+3. Which regions have the most observations with missing HIV data? Generate a bar chart (`geom_col()`), in descending order.
+```{r hiv_missing_data,warning=FALSE, fig.width=11}
+hiv_missing <- new_dataset %>%
+  group_by(region) %>%
+  summarize(n_missing(hiv_pct)) %>%
+  rename("hiv_missing_count"="n_missing(hiv_pct)") 
+  
+hiv_miss <- ggplot()+
+  geom_col(data=hiv_missing, aes(x=hiv_missing_count, y=reorder(region,hiv_missing_count),fill=-hiv_missing_count))+
+  #scale_fill_hue(c = 40)
+  labs(title = "Missing HIV data count by Region", y = "Region", x= "HIV missing count")+
+  theme(legend.position = "none")
+
+hiv_miss
+
+
+```
+*As the barchart indicates, the Sub-Saharan Africa has the most observations with 497 missing HIV data, followed by Europe & Central Asia, which has 435 missing HIV data.*
+
+4. How has mortality rate under 5 changed by region? In each region, find the top 5 countries that have seen the greatest improvement, as well as those 5 countries where mortality rates have had the least improvement or even deterioration.
+```{r mortality rate under 5 change,warning=FALSE, fig.width=11}
+#How has mortality rate under 5 changed by region
+mortality_by_region <- ggplot(worldbank2, aes(x=year, y=SH.DYN.MORT))+
+  geom_point(aes(color=country), size=0.2)+
+  labs(title = "Scatterplot of mortality rate by year per region", y = "Mortality rate under 5", x= "Year")+
+  geom_smooth(method = "lm")+
+  theme_bw()+
+  facet_wrap(vars(region), scales = "free" )+
+  theme(legend.position = "none")+
+  NULL
+  
+mortality_by_region
+
+```
+*Overall, the mortality rate under 5 has declined since 1960. Among all of the regions, South Asia has the greatest improvement while North America has the least improvement.*
+
+```{r top 5 countries greatest improvement in each region,warning=FALSE, fig.width = 15}
+#top 5 countries that have seen the greatest improvement in each region
+
+mortality_rate<- worldbank2 %>%
+  select(country,region,year,SH.DYN.MORT)
+
+# calculate the improvement  of mortality rate under 5 
+mortality_improvement <-mortality_rate %>%
+   na.omit()%>%
+   group_by(region,country) %>%
+   mutate(first_rate=first(SH.DYN.MORT),last_rate=last(SH.DYN.MORT))%>%
+   summarise(improvement= (first_rate-last_rate)/first_rate) 
+  
+mortality_improvement <-  mortality_improvement[!duplicated(mortality_improvement ), ]
+
+
+top_5_country <-mortality_improvement %>%
+  group_by(region)%>%
+  slice_max(improvement, n=5)
+top_5_country
+
+least_5_country <-mortality_improvement %>%
+  group_by(region)%>%
+  slice_min(improvement, n=5)
+least_5_country
+
+
+top_5_country_bar <- ggplot()+
+  geom_col(data=top_5_country, aes(x=reorder(country,-improvement), y=improvement,fill=improvement))+
+  facet_wrap(vars(region), scales = "free_x" )+
+  labs(title = "Top 5 countries that have greatest improvement", y = "improvement", x= "country")+
+  #theme(legend.position = "none")+
+  NULL
+
+top_5_country_bar
+
+least_5_country_bar <- ggplot()+
+  geom_col(data=least_5_country, aes(x=reorder(country,-improvement), y=improvement,fill=improvement))+
+  facet_wrap(vars(region), scales = "free_x" )+
+  labs(title = "Top 5 countries that have least improvement", y = "improvement", x= "country")+
+  #theme(legend.position = "none")+
+  NULL
+
+least_5_country_bar 
+
+```
+*The tables above show the Top 5 countries that have experienced the greatest/least improvement in mortality rate from 1960 to 2016 by region. For instance, in east Asia & Pacific Korea, Rep., Singapore, Japan, Thailand and China have made the greatest improvement while in Micronesia Palau, Nauru, Tuvalu and Fiji have made the least improvement. As for South Asia and North America, since the number of the countries is less than 10, the Top 5 and Last 5 are not very representative. We didn't observe that there is any deterioration in mortality rate so far. The country that experienced the least improvement is Somalia in Sub-Saharan Africa with 0.346 improvement.*
+
+5. Is there a relationship between primary school enrollment and fertility rate?
+```{r school_enrollment_vs_fertility_rate,warning=FALSE, fig.width=11}
+
+school_fertility <- ggplot(worldbank2, aes(x=SE.PRM.NENR, y=SP.DYN.TFRT.IN))+
+  geom_point(aes(color=region), size=0.5)+
+  labs(title = "Scatterplot of fertility rate and primary school enrollment", y = "fertility rate", x= "primary school enrollment")+
+  geom_smooth(method = "lm")+
+  theme_bw()+
+  NULL
+school_fertility
+
+
+school_fertility_region <- ggplot(worldbank2, aes(x=SE.PRM.NENR, y=SP.DYN.TFRT.IN))+
+  geom_point(aes(color=region), size=0.2)+
+  labs(title = "Scatterplot of fertility rate and primary school enrollment by region", y = "fertility rate", x= "primary school enrollment")+
+  geom_smooth(method = "lm")+
+  theme_bw()+
+  facet_wrap(vars(region), scales = "free" )+
+  theme(legend.position = "none")+
+  NULL
+school_fertility_region
+
+fertility_change <- ggplot(worldbank2, aes(x=year, y=SP.DYN.TFRT.IN))+
+  geom_point(aes(color=country), size=0.2)+
+  labs(title = "Scatterplot of fertility rate by year per region", y = "fertility rate", x= "year")+
+  geom_smooth(method = "lm")+
+  theme_bw()+
+  facet_wrap(vars(region), scales = "free" )+
+  theme(legend.position = "none")+
+  NULL
+fertility_change
+
+enrollment_change<- ggplot(worldbank2, aes(x=year, y=SE.PRM.NENR))+
+  geom_point(aes(color=country), size=0.2)+
+  labs(title = "Scatterplot of primary school enrollment rate by year per region", y = "primary school enrollment", x= "year")+
+  geom_smooth(method = "lm")+
+  theme_bw()+
+  facet_wrap(vars(region), scales = "free" )+
+  theme(legend.position = "none")+
+  xlim(1970,2011)
+  NULL
+
+enrollment_change
+
+```
+
+*As the first and second scatterplot above indicates, there is a negative correlation between fertility rate and primary school enrollment rate. To explore the reason, we took a further look at how fertility rate and primary school enrollment rate have changed from 1960 to 2016 by each country in the respective regions. We can observe an obvious fertility rate decline as well as a rise in primary school enrollment which indicates the overall educational level has improved over the years. This may furthermore explain the negative correlation between fertility rate and primary school enrollment rate.*
+
+# Challenge 1: Excess rentals in TfL bike sharing
+
+```{r get_tfl_data, cache=TRUE, warning = FALSE}
+url <- "https://data.london.gov.uk/download/number-bicycle-hires/ac29363e-e0cb-47cc-a97a-e216d900a6b0/tfl-daily-cycle-hires.xlsx"
+
+# Download TFL data to temporary file
+httr::GET(url, write_disk(bike.temp <- tempfile(fileext = ".xlsx")))
+
+# Use read_excel to read it as dataframe
+bike0 <- read_excel(bike.temp,
+                   sheet = "Data",
+                   range = cell_cols("A:B"))
+
+# change dates to get year, month, and week
+bike <- bike0 %>% 
+  clean_names() %>% 
+  rename (bikes_hired = number_of_bicycle_hires) %>% 
+  mutate (year = year(day),
+          month = lubridate::month(day, label = TRUE),
+          week = isoweek(day),
+          single_day = day(day))
+```
+
+We can easily create a facet grid that plots bikes hired by month and year.
+```{r facet_bike_rentals, warning = FALSE, fig.width = 15, fig.heigh = 9}
+library(scales)
+facet_monthly_bike_rentals <- bike %>%
+  filter(year >= 2015)%>%
+  ggplot(aes(x = bikes_hired))+
+    geom_density()+
+    facet_grid(vars(year), vars(month))+
+  
+    scale_x_continuous(labels = number_format(scale = 1/1000, suffix = "K"))+
+  
+    theme(axis.text.y = element_blank(), plot.background = element_blank(), panel.background = element_blank(), panel.grid = element_line(color = "lightgrey"), strip.background = element_blank())+
+  
+    labs(title = "Distribution of bikes hired per month", x = "Bike Rentals")
+    
+
+facet_monthly_bike_rentals
+
+```
+
+Look at May and Jun and compare 2020 with the previous years. What's happening?
+
+*It is observable, that the distribution of bike rentals in May and June tends to be more concentrated and centralised around 40,000 daily bike rentals than in many of the other months. This might be due to the fact that temperatures and the overall weather is more stable in these months, and thus there is less fluctuation in daily demand.*
+*Looking at the overall distribution of bike rentals in 2020 compared to the previous years, the first two months seem similar. However, starting from March, a shift in distribution towards the left, can be seen, indicating that bike rentals incurred a period of less demand. This can likely be attributed to the outbreak of the COVID19 pandemic, and people staying home more frequently. This trend continues until the month of June, from which bike rentals follow the previous years' distributions more closely once again.*
+
+```{r monthly_means}
+monthly_mean <- bike %>%
+  filter(year %in% c(2016, 2017, 2018, 2019)) %>% #We filter for these years, as they are the only ones relevant to the calculation of the mean
+  group_by(month) %>%
+  summarise(mean_demand = mean(bikes_hired)) #we calculate the mean bike rentals per month for the period from 2016 until 2019
+```
+
+```{r numeric_month}
+# We need to make month numeric in order for the line plot to be displayed properly.
+
+month <- c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+mon_num <- 1:12
+
+df_month <- tibble(month, mon_num)
+df_month #we allocate each number to the respective month, so that we can bind the numbers to the actual bike data table
+```
+
+```{r plot_bike_diff, fig.width=11}
+bike_diff <- bike %>%
+  left_join(df_month, by = "month") %>% 
+  left_join(monthly_mean, by = "month") %>% #We join the monthly mean (2016-2019) and the month numbers to the bike data table
+  group_by(year, month, mon_num) %>% 
+  summarise(bikes_hired_month_avg = mean(bikes_hired), mean_demand = mean(mean_demand), mon_num = mean(mon_num)) %>% #we calculate the actual mean of bike rentals per month. Compared to the other mean however, we limit this calculation to just the respective year, instead of across the four years from 2016 - 2019
+  mutate(diff_exp = mean_demand - bikes_hired_month_avg, less_than_mean = if_else(diff_exp >= 0, -diff_exp, 0), more_than_mean = if_else(diff_exp < 0, -diff_exp, 0)) #we introduce two new variables, that either become the difference between the present month's mean and the total mean or 0, depending on the sign of the difference. We introduce this variable, in order to be able to differentiate between when to colour our ribbon red or green at a later stage.
+
+
+plotActualForecast <- bike_diff %>% 
+  filter(year %in% c(2016, 2017, 2018, 2019, 2020, 2021)) %>% 
+  
+  ggplot(aes(x = mon_num))+
+
+    geom_line(aes(y = bikes_hired_month_avg))+
+    geom_line(aes(y = mean_demand), color = "#2d0fd7", size = 1)+
+
+    geom_ribbon(aes(ymin = mean_demand, ymax = mean_demand + more_than_mean), fill = "#7DCD85", alpha = 0.4)+ 
+    geom_ribbon(aes(ymin = mean_demand, ymax = mean_demand + less_than_mean), fill = "#CB454A", alpha = 0.4)+ #here we go ahead with our implementation of different colour per ribbon, depending on whether the actual monthly mean is bigger than the overall one or not. This is done by varying the upper limit in ymax: If we don't want one colour, this upper limit is essentially equal to the lower one such that no ribbon gets drawn.
+
+    facet_wrap(vars(year))+
+  
+    labs(title = "Monthly changes in TFL bike rentals", subtitle = "Change from monthly average shown in blue and calculated between 2016 and 2019", x ="Month", y = "Bike Rentals")+
+  
+    scale_x_discrete(limits = month)+
+  
+    theme_bw()+
+    theme(strip.background = element_blank())
+
+plotActualForecast
+```
+
+```{r bike_week}
+weekly_mean <- bike %>%
+  filter(year %in% c(2016, 2017, 2018, 2019, 2020, 2021)) %>% 
+  select("bikes_hired", "week") %>% 
+  group_by(week) %>% 
+  summarise(weekly_avg = mean(bikes_hired)) #similarly to the overall month mean, we calculate the overall week mean
+
+```
+
+```{r join_weekly_avg}
+joinedWeeklyBike <- bike %>% 
+  left_join(weekly_mean, by = "week") %>% #we join the overall weekly averages with the actual data table
+  select("year", "week", "bikes_hired", "weekly_avg") %>% 
+  group_by(year, week) %>% 
+  summarise(actual_week_avg = mean(bikes_hired), weekly_avg = mean(weekly_avg)) %>% 
+  mutate(percChange = (actual_week_avg-weekly_avg)/weekly_avg) #we calculate the percentage change, which we plot against the weeks
+
+```
+
+```{r plot_bike_weekly, fig.width=11}
+joinedWeeklyBike <- joinedWeeklyBike %>% 
+  filter(year %in% c(2016, 2017, 2018, 2019, 2020, 2021))
+
+plotWeeklyBike <- joinedWeeklyBike %>% 
+  ggplot(aes(x = week))+
+    geom_line(aes(y = percChange))+
+  
+    geom_ribbon(aes(ymin = 0, ymax = if_else(percChange >= 0, percChange, 0)), fill = "#7DCD85", alpha = 0.4)+
+    geom_ribbon(aes(ymin = if_else(percChange < 0, percChange, 0), ymax = 0), fill = "#CB454A", alpha = 0.4)+ #we vary the lower and upper limits of the ribbon, in order to accurately fill the area between the graph and the x axis
+  
+    geom_rug(data = joinedWeeklyBike, sides = "b", colour = if_else(joinedWeeklyBike$percChange >= 0,"#7DCD85","#CB454A"))+ #we include geom_rug to depict the small lines above the x axis, indicating a positive or negative value of percentage change in either green or red
+    
+    facet_wrap(vars(year))+
+  
+    theme_bw()
+
+plotWeeklyBike
+```
+
+Should you use the mean or the median to calculate your expected rentals? Why?
+
+*It makes sense to use the mean for calculating expected rentals, as we really need to take very low and very high numbers into consideration. If one were to use the median, and thereby ignore outlying values, the supply might not be well prepared for keeping up with demand on specific days.*
+
+# Deliverables
+
+As usual, there is a lot of explanatory text, comments, etc. You do not need these, so delete them and produce a stand-alone document that you could share with someone. Knit the edited and completed R Markdown file as an HTML document (use the "Knit" button at the top of the script editor window) and upload it to Canvas.
+
+# Details
+
+-   Who did you collaborate with: *Group 3 (Jiaying Chen, Yingjin He, Sabrina Seow, Kashish Solanki, Roman Vazquez Lorenzo, Maximilian Stock)*
+-   Approximately how much time did you spend on this problem set: *12 hours*
+-   What, if anything, gave you the most trouble: *Finding a proper way to switch between red and green colours when using geom_ribbon*
